@@ -13,6 +13,41 @@ namespace Moths.Tweens
         UnscaledFixedUpdate,
     };
 
+    public struct CancellationToken : IDisposable
+    {
+        private static Allocator<State> Allocator;
+
+        internal struct State
+        {
+            public bool isCancelled;
+            public int count;
+        }
+
+        private bool _isCreated;
+        private Ptr<State> _state;
+
+        internal unsafe Ptr<State> Create()
+        {
+            if (_isCreated) return _state;
+            _isCreated = true;
+            _state = Allocator.Malloc();
+            _state.Pointer->isCancelled = false;
+            return _state;
+        }
+        public unsafe void Cancel()
+        {
+            if (!_isCreated) return;
+            _isCreated = false;
+            _state.Pointer->isCancelled = true;
+            Allocator.Free(_state);
+        }
+
+        public void Dispose()
+        {
+            Cancel();
+        }
+    }
+
     public unsafe struct Tween<TContext, TValue>
     {
         internal struct SharedData
@@ -32,6 +67,8 @@ namespace Moths.Tweens
         private TValue _startValue;
         private TValue _endValue;
         private delegate*<TValue, TValue, float, Ease, TValue> _updater;
+        private Ptr<CancellationToken> _cts;
+        private Ptr<CancellationToken.State> _cancellationState;
         private Ease _ease;
         private AnimationCurve _curve;
         private UpdateType _updateType;
@@ -69,7 +106,8 @@ namespace Moths.Tweens
         public Tween<TContext, TValue> SetCurve(AnimationCurve curve) { _curve = curve; return this; }
         public Tween<TContext, TValue> SetUpdateType(UpdateType updateType) { _updateType = updateType; return this; }
         public Tween<TContext, TValue> SetLink(UnityEngine.Object obj) { _obj = obj; return this; }
-        public Tween<TContext, TValue> Delay(float delay) { _data.Ref.time = -delay; return this; }
+        public Tween<TContext, TValue> SetDelay(float delay) { _data.Ref.time = -delay; return this; }
+        public Tween<TContext, TValue> SetCancellationToken(ref CancellationToken token) { _cts = new Ptr<CancellationToken>(ref token); _cancellationState = token.Create(); return this; }
 
         public Tween<TContext, TValue> Play()
         {
@@ -78,6 +116,7 @@ namespace Moths.Tweens
             if (IsPlaying) return this;
             _data.Pointer->isPlaying = true;
             ListenUpdate();
+            if (!_cancellationState.IsNull()) _cancellationState.Pointer->count++;
             return this;
         }
 
@@ -87,17 +126,25 @@ namespace Moths.Tweens
             _data.Pointer->isPaused = true;
         }
 
-        public void Stop()
+        public void Cancel()
         {
             if (!IsPlaying) return;
             UnlistenUpdate();
             Allocator.Free(_data);
+            if (!_cancellationState.IsNull())
+            {
+                _cancellationState.Pointer->count--;
+                if (_cancellationState.Pointer->count == 0)
+                {
+                    if (!_cts.IsNull()) _cts.Pointer->Dispose();
+                }
+            }
         }
 
         public void Complete()
         {
             if (!IsPlaying) return;
-            Stop();
+            Cancel();
             _onComplete?.Invoke(_context);
         }
 
@@ -132,7 +179,13 @@ namespace Moths.Tweens
         {
             if (!_obj)
             {
-                Stop();
+                Cancel();
+                return;
+            }
+
+            if (!_cancellationState.IsNull() && _cancellationState.Pointer->isCancelled)
+            {
+                Cancel();
                 return;
             }
 
