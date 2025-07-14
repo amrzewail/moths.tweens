@@ -1,68 +1,83 @@
+using System;
 using UnityEngine;
 
 namespace Moths.Tweens.Extensions
 {
     public static class TransformExtensions
     {
-        public static Tween<Transform, Vector3> TweenPosition(this Transform transform, Vector3 to)
+        // ==== Cached Callbacks ====
+
+        private static readonly Action<Transform, Vector3> _setPosition = (t, v) => t.position = v;
+        private static readonly Action<Transform, Quaternion> _setRotation = (t, v) => t.rotation = v;
+        private static readonly Action<Transform, Vector3> _setEulerAngles = (t, v) => t.eulerAngles = v;
+        private static readonly Action<Transform, Vector3> _setLocalPosition = (t, v) => t.localPosition = v;
+        private static readonly Action<Transform, Quaternion> _setLocalRotation = (t, v) => t.localRotation = v;
+        private static readonly Action<Transform, Vector3> _setLocalScale = (t, v) => t.localScale = v;
+        private static readonly Action<Transform, Vector3> _setLocalEulerAngles = (t, v) => t.localEulerAngles = v;
+
+        // ==== Tween Extension Methods ====
+
+        public static TweenBuilder<Transform, Vector3> TweenPosition(this Transform transform, Vector3 to)
         {
             return Tweener.Value(transform, transform.position, to)
-                .SetOnValueChange((t, v) => t.position = v)
+                .SetOnValueChange(_setPosition)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Quaternion> TweenRotation(this Transform transform, Quaternion to)
+        public static TweenBuilder<Transform, Quaternion> TweenRotation(this Transform transform, Quaternion to)
         {
             return Tweener.Value(transform, transform.rotation, to)
-                .SetOnValueChange((t, v) => t.rotation = v)
+                .SetOnValueChange(_setRotation)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Vector3> TweenEulerAngles(this Transform transform, Vector3 to)
+        public static TweenBuilder<Transform, Vector3> TweenEulerAngles(this Transform transform, Vector3 to)
         {
             return Tweener.Value(transform, transform.eulerAngles, to)
-                .SetOnValueChange((t, v) => t.eulerAngles = v)
+                .SetOnValueChange(_setEulerAngles)
                 .SetLink(transform);
         }
-        public static Tween<Transform, Vector3> TweenLocalPosition(this Transform transform, Vector3 to)
+
+        public static TweenBuilder<Transform, Vector3> TweenLocalPosition(this Transform transform, Vector3 to)
         {
             return Tweener.Value(transform, transform.localPosition, to)
-                .SetOnValueChange((t, v) => t.localPosition = v)
+                .SetOnValueChange(_setLocalPosition)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Quaternion> TweenLocalRotation(this Transform transform, Quaternion to)
+        public static TweenBuilder<Transform, Quaternion> TweenLocalRotation(this Transform transform, Quaternion to)
         {
             return Tweener.Value(transform, transform.localRotation, to)
-                .SetOnValueChange((t, v) => t.localRotation = v)
+                .SetOnValueChange(_setLocalRotation)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Vector3> TweenLocalScale(this Transform transform, Vector3 to)
+        public static TweenBuilder<Transform, Vector3> TweenLocalScale(this Transform transform, Vector3 to)
         {
             return Tweener.Value(transform, transform.localScale, to)
-                .SetOnValueChange((t, v) => t.localScale = v)
+                .SetOnValueChange(_setLocalScale)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Vector3> TweenLocalEulerAngles(this Transform transform, Vector3 to)
+        public static TweenBuilder<Transform, Vector3> TweenLocalEulerAngles(this Transform transform, Vector3 to)
         {
             return Tweener.Value(transform, transform.localEulerAngles, to)
-                .SetOnValueChange((t, v) => t.localEulerAngles = v)
+                .SetOnValueChange(_setLocalEulerAngles)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Vector3> TweenDirection(this Transform transform, Vector3 direction)
+        public static TweenBuilder<Transform, Vector3> TweenDirection(this Transform transform, Vector3 direction)
         {
             return Tweener.Value(transform, transform.position, transform.position + direction)
-                .SetOnValueChange((t, v) => t.position = v)
+                .SetOnValueChange(_setPosition)
                 .SetLink(transform);
         }
 
-        public static Tween<Transform, Vector3> TweenLocalDirection(this Transform transform, Vector3 localDirection)
+        public static TweenBuilder<Transform, Vector3> TweenLocalDirection(this Transform transform, Vector3 localDirection)
         {
-            return Tweener.Value(transform, transform.localPosition, transform.localPosition + transform.InverseTransformDirection(localDirection))
-                .SetOnValueChange((t, v) => t.localPosition = v)
+            var target = transform.localPosition + transform.InverseTransformDirection(localDirection);
+            return Tweener.Value(transform, transform.localPosition, target)
+                .SetOnValueChange(_setLocalPosition)
                 .SetLink(transform);
         }
     }

@@ -4,7 +4,6 @@ using UnityEngine;
 
 namespace Moths.Tweens
 {
-
     public enum UpdateType
     {
         Update,
@@ -13,49 +12,16 @@ namespace Moths.Tweens
         UnscaledFixedUpdate,
     };
 
-    public struct CancellationToken : IDisposable
-    {
-        private static Allocator<State> Allocator;
-
-        internal struct State
-        {
-            public bool isCancelled;
-            public int count;
-        }
-
-        private bool _isCreated;
-        private Ptr<State> _state;
-
-        internal unsafe Ptr<State> Create()
-        {
-            if (_isCreated) return _state;
-            _isCreated = true;
-            _state = Allocator.Malloc();
-            _state.Pointer->isCancelled = false;
-            return _state;
-        }
-        public unsafe void Cancel()
-        {
-            if (!_isCreated) return;
-            _isCreated = false;
-            _state.Pointer->isCancelled = true;
-            Allocator.Free(_state);
-        }
-
-        public void Dispose()
-        {
-            Cancel();
-        }
-    }
-
-    public unsafe struct Tween<TContext, TValue>
+    public unsafe partial struct Tween<TContext, TValue>
     {
         internal struct SharedData
         {
             public float time;
+            public float duration;
+
+            public int updateIndex;
             public bool isPlaying;
             public bool isPaused;
-            public float duration;
         };
 
         private static Allocator<SharedData> Allocator;
@@ -84,30 +50,45 @@ namespace Moths.Tweens
         public float Value => Duration > 0 ? Mathf.Clamp01(Time / Duration) : 1;
         public TValue EasedValue => _updater(_startValue, _endValue, Value, _ease);
 
+        public static Tween<TContext, TValue> Create(TweenBuilder<TContext, TValue> builder)
+        {
+            var tween = new Tween<TContext, TValue>();
+
+            tween._context = builder.Context;
+            tween._startValue = builder.StartValue;
+            tween._endValue = builder.EndValue;
+            tween._updater = builder.Updater;
+            tween._cts = builder.Cts;
+            if (!tween._cts.IsNull()) tween._cancellationState = tween._cts.Pointer->Create();
+            tween._ease = builder.Ease;
+            tween._curve = builder.Curve;
+            tween._updateType = builder.UpdateType;
+            tween._obj = builder.Obj;
+            tween._onValueChange = builder.OnValueChange;
+            tween._onComplete = builder.OnComplete;
+
+            tween._data = Allocator.Malloc();
+            tween._data.Pointer->duration = builder.Duration;
+            tween._data.Pointer->time = -builder.Delay;
+
+            tween._data.Pointer->isPaused = false;
+            tween._data.Pointer->isPlaying = false;
+            tween._data.Pointer->updateIndex = -1;
+
+            return tween;
+        }
+
         public static Tween<TContext, TValue> Create(delegate*<TValue, TValue, float, Ease, TValue> updater)
         {
             var tween = new Tween<TContext, TValue>();
             tween._data = Allocator.Malloc();
-            tween._data.Ref.time = 0;
-            tween._data.Ref.isPaused = false;
-            tween._data.Ref.isPlaying = false;
+            tween._data.Pointer->time = 0;
+            tween._data.Pointer->isPaused = false;
+            tween._data.Pointer->isPlaying = false;
+            tween._data.Pointer->updateIndex = -1;
             tween._updater = updater;
             return tween;
         }
-
-        public Tween<TContext, TValue> SetStartValue(TValue startValue) { _startValue =  startValue; return this; }
-        public Tween<TContext, TValue> SetEndValue(TValue endValue) { _endValue =  endValue; return this; }
-        public Tween<TContext, TValue> SetDuration(float duration) { _data.Ref.duration = duration; return this; }
-        public Tween<TContext, TValue> SetUpdater(delegate*<TValue, TValue, float, Ease, TValue> updater) { _updater = updater; return this; }
-        public Tween<TContext, TValue> SetContext(TContext context) { _context = context; return this; }
-        public Tween<TContext, TValue> SetOnValueChange(Action<TContext, TValue> onValueChange) { _onValueChange = onValueChange; return this; }
-        public Tween<TContext, TValue> SetOnComplete(Action<TContext> onComplete) { _onComplete = onComplete; return this; }
-        public Tween<TContext, TValue> SetEase(Ease ease) { _ease = ease; return this; }
-        public Tween<TContext, TValue> SetCurve(AnimationCurve curve) { _curve = curve; return this; }
-        public Tween<TContext, TValue> SetUpdateType(UpdateType updateType) { _updateType = updateType; return this; }
-        public Tween<TContext, TValue> SetLink(UnityEngine.Object obj) { _obj = obj; return this; }
-        public Tween<TContext, TValue> SetDelay(float delay) { _data.Ref.time = -delay; return this; }
-        public Tween<TContext, TValue> SetCancellationToken(ref CancellationToken token) { _cts = new Ptr<CancellationToken>(ref token); _cancellationState = token.Create(); return this; }
 
         public Tween<TContext, TValue> Play()
         {
@@ -140,7 +121,6 @@ namespace Moths.Tweens
                 }
             }
         }
-
         public void Complete()
         {
             if (!IsPlaying) return;
@@ -150,29 +130,31 @@ namespace Moths.Tweens
 
         private void ListenUpdate()
         {
-            if (!Tweener.UpdateActions.TryGetValue(_data, out Action update)) Tweener.UpdateActions[_data] = update = Update;
-            if (_updateType == UpdateType.Update || _updateType == UpdateType.UnscaledUpdate)
+            if (_data.Pointer->updateIndex == -1)
             {
-                Tweener.Update += update;
-            }
-            else
-            {
-                Tweener.FixedUpdate += update;
+                if (_updateType == UpdateType.Update || _updateType == UpdateType.UnscaledUpdate)
+                {
+                    _data.Pointer->updateIndex = Tweener.SubscribeUpdate(Update);
+                }
+                else
+                {
+                    _data.Pointer->updateIndex = Tweener.SubscribeFixedUpdate(Update);
+                }
             }
         }
 
         private void UnlistenUpdate()
         {
-            if (!Tweener.UpdateActions.TryGetValue(_data, out Action update)) return;
+            if (_data.Pointer->updateIndex == -1) return;
             if (_updateType == UpdateType.Update || _updateType == UpdateType.UnscaledUpdate)
             {
-                Tweener.Update -= update;
+                Tweener.UnsubscribeUpdate(_data.Pointer->updateIndex);
             }
             else
             {
-                Tweener.FixedUpdate -= update;
+                Tweener.UnsubscribeFixedUpdate(_data.Pointer->updateIndex);
             }
-            Tweener.UpdateActions.Remove(_data);
+            _data.Pointer->updateIndex = -1;
         }
 
         private unsafe void Update()
