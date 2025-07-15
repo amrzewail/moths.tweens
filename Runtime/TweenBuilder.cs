@@ -117,6 +117,12 @@ namespace Moths.Tweens
             return this;
         }
 
+        public Tween<TContext, TValue> Build()
+        {
+            var tween = Tween<TContext, TValue>.Create(this);
+            return tween;
+        }
+
         public Tween<TContext, TValue> Play()
         {
             var tween = Tween<TContext, TValue>.Create(this);
