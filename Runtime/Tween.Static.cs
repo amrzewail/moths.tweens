@@ -17,7 +17,7 @@ namespace Moths.Tweens
             public Ptr<SharedData> data;
         }
 
-        private const int LENGTH = 4096;
+        private const int LENGTH = 128;
 
         private static Allocator<SharedData> Allocator;
 
@@ -27,25 +27,35 @@ namespace Moths.Tweens
 
         private static readonly Action _updateAction = UpdateTweens;
         private static int _updateIndex;
+        private static bool _wasPlaying = false;
 
         private static unsafe void UpdateTweens()
         {
             if (!Application.isPlaying)
             {
-                if (_startedTweensCount > 0)
+                if (_wasPlaying)
                 {
-                    for (int i = 0; i < LENGTH; i++)
+                    for (int i = 0; i < _tweens.Length; i++)
                     {
-                        if (_tweens[i].isStarted) continue;
+                        if (!_tweens[i].isAllocated) continue;
                         _tweens[i].data.Pointer->tween.Dispose();
                     }
+                    _tweens = new TweenInstance[LENGTH];
                     _startedTweensCount = 0;
                     Allocator.FreeAll();
                 }
+                if (_tweens.Length != LENGTH || _wasPlaying)
+                {
+                    _tweens = new TweenInstance[LENGTH];
+                }
+
+                _wasPlaying = false;
                 return;
             }
 
-            for (int i = 0; i < LENGTH; i++)
+            _wasPlaying = true;
+            int length = _tweens.Length;
+            for (int i = 0; i < length; i++)
             {
                 if (!_tweens[i].isStarted) continue;
                 _tweens[i].data.Pointer->tween.Update();
@@ -54,9 +64,10 @@ namespace Moths.Tweens
 
         private static int AllocateTween(Ptr<SharedData> data, ManagedData managed)
         {
-            for (int i = _startedTweensCount; i < _startedTweensCount + LENGTH; i++)
+            int length = _tweens.Length;
+            for (int i = _allocatedTweensCount; i < _allocatedTweensCount + length; i++)
             {
-                int index = _startedTweensCount % LENGTH;
+                int index = _allocatedTweensCount % length;
                 if (_tweens[index].isAllocated) continue;
                 _tweens[index] = new TweenInstance
                 {
@@ -68,7 +79,28 @@ namespace Moths.Tweens
                 _allocatedTweensCount++;
                 return index;
             }
-            return -1;
+
+            // No free slot found: grow array
+            int oldLength = _tweens.Length;
+            int newLength = oldLength * 4;
+
+            var newArray = new TweenInstance[newLength];
+            for (int i = 0; i < oldLength; i++)
+                newArray[i] = _tweens[i];
+
+            _tweens = newArray;
+
+            // Now retry allocation at the first free slot in extended space
+            _tweens[oldLength] = new TweenInstance
+            {
+                data = data,
+                managed = managed,
+                isStarted = false,
+                isAllocated = true
+            };
+
+            _allocatedTweensCount++;
+            return oldLength;
         }
 
         private static void StartTween(int index)
