@@ -1,5 +1,6 @@
 using Moths.Tweens.Memory;
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Moths.Tweens
@@ -12,36 +13,47 @@ namespace Moths.Tweens
         UnscaledFixedUpdate,
     };
 
-    public unsafe partial struct Tween<TContext, TValue>
+    public unsafe partial struct Tween<TContext, TValue> where TValue : unmanaged
     {
         internal struct SharedData
         {
             public float time;
             public float duration;
 
-            public int updateIndex;
+            public int tweenIndex;
             public bool isPlaying;
             public bool isPaused;
+
+            public Tween<TContext, TValue> tween;
         };
 
-        private static Allocator<SharedData> Allocator;
+        internal struct ManagedData
+        {
+            public TContext context;
+            public AnimationCurve curve;
+            public bool hasLink;
+            public object obj;
+            public Action<TContext, TValue> onValueChange;
+            public Action<TContext> onComplete;
+        }
 
         private Ptr<SharedData> _data;
+        private ManagedData Managed => _tweens[_data.Pointer->tweenIndex].managed;
 
-        private TContext _context;
-        private TValue _currentValue;
+        //private ManagedPtr<TContext> _context;
         private TValue _startValue;
         private TValue _endValue;
         private delegate*<TValue, TValue, float, Ease, TValue> _updater;
         private Ptr<CancellationToken> _cts;
         private Ptr<CancellationToken.State> _cancellationState;
         private Ease _ease;
-        private AnimationCurve _curve;
         private UpdateType _updateType;
-        private UnityEngine.Object _obj;
 
-        private Action<TContext, TValue> _onValueChange;
-        private Action<TContext> _onComplete;
+        //private ManagedPtr<AnimationCurve> _curve;
+        //private ManagedPtr<object> _obj;
+
+        //private ManagedPtr<Action<TContext, TValue>> _onValueChange;
+        //private ManagedPtr<Action<TContext>> _onComplete;
 
         public bool IsPlaying => !_data.IsNull() && _data.Value.isPlaying;
         public bool IsPaused => IsPlaying ? _data.Value.isPaused : false;
@@ -54,18 +66,27 @@ namespace Moths.Tweens
         {
             var tween = new Tween<TContext, TValue>();
 
-            tween._context = builder.Context;
+            //tween._context = new ManagedPtr<TContext>(builder.Context);
             tween._startValue = builder.StartValue;
             tween._endValue = builder.EndValue;
             tween._updater = builder.Updater;
+            tween._updateType = builder.UpdateType;
+
             tween._cts = builder.Cts;
             if (!tween._cts.IsNull()) tween._cancellationState = tween._cts.Pointer->Create();
             tween._ease = builder.Ease;
-            tween._curve = builder.Curve;
-            tween._updateType = builder.UpdateType;
-            tween._obj = builder.Obj;
-            tween._onValueChange = builder.OnValueChange;
-            tween._onComplete = builder.OnComplete;
+            //if (builder.Curve != null) tween._curve = new ManagedPtr<AnimationCurve>();
+            //if (builder.Obj != null) tween._obj = new ManagedPtr<object>(builder.Obj);
+            //if (builder.OnValueChange != null) tween._onValueChange = new ManagedPtr<Action<TContext, TValue>>(builder.OnValueChange);
+            //if (builder.OnComplete != null) tween._onComplete = new ManagedPtr<Action<TContext>>(builder.OnComplete);
+
+            ManagedData managed = new ManagedData();
+            managed.context = builder.Context;
+            managed.curve = builder.Curve;
+            managed.obj = builder.Obj;
+            managed.hasLink = managed.obj != null;
+            managed.onValueChange = builder.OnValueChange;
+            managed.onComplete = builder.OnComplete;
 
             tween._data = Allocator.Malloc();
             tween._data.Pointer->duration = builder.Duration;
@@ -73,32 +94,28 @@ namespace Moths.Tweens
 
             tween._data.Pointer->isPaused = false;
             tween._data.Pointer->isPlaying = false;
-            tween._data.Pointer->updateIndex = -1;
+            tween._data.Pointer->tweenIndex = -1;
 
+            tween._data.Pointer->tween = tween;
+
+            tween._data.Pointer->tweenIndex = AllocateTween(tween._data, managed);
+            
             return tween;
         }
 
-        public static Tween<TContext, TValue> Create(delegate*<TValue, TValue, float, Ease, TValue> updater)
+        public void Play()
         {
-            var tween = new Tween<TContext, TValue>();
-            tween._data = Allocator.Malloc();
-            tween._data.Pointer->time = 0;
-            tween._data.Pointer->isPaused = false;
-            tween._data.Pointer->isPlaying = false;
-            tween._data.Pointer->updateIndex = -1;
-            tween._updater = updater;
-            return tween;
-        }
-
-        public Tween<TContext, TValue> Play()
-        {
-            if (_data.IsNull()) return this;
+            if (_data.IsNull()) return;
+            if (_data.Pointer->tweenIndex == -1)
+            {
+                Dispose();
+                return;
+            }
             if (IsPaused) _data.Pointer->isPaused = false;
-            if (IsPlaying) return this;
+            if (IsPlaying) return;
             _data.Pointer->isPlaying = true;
             ListenUpdate();
             if (!_cancellationState.IsNull()) _cancellationState.Pointer->count++;
-            return this;
         }
 
         public void Pause()
@@ -110,8 +127,24 @@ namespace Moths.Tweens
         public void Cancel()
         {
             if (!IsPlaying) return;
+
             UnlistenUpdate();
+            Dispose();
+        }
+
+        public void Complete()
+        {
+            if (!IsPlaying) return;
+            var managed = Managed;
+            managed.onComplete?.Invoke(managed.context);
+            //_onComplete.Value?.Invoke(_context.Value);
+            Cancel();
+        }
+
+        private void Dispose()
+        {
             Allocator.Free(_data);
+
             if (!_cancellationState.IsNull())
             {
                 _cancellationState.Pointer->count--;
@@ -121,45 +154,22 @@ namespace Moths.Tweens
                 }
             }
         }
-        public void Complete()
-        {
-            if (!IsPlaying) return;
-            Cancel();
-            _onComplete?.Invoke(_context);
-        }
 
         private void ListenUpdate()
         {
-            if (_data.Pointer->updateIndex == -1)
-            {
-                if (_updateType == UpdateType.Update || _updateType == UpdateType.UnscaledUpdate)
-                {
-                    _data.Pointer->updateIndex = Tweener.SubscribeUpdate(Update);
-                }
-                else
-                {
-                    _data.Pointer->updateIndex = Tweener.SubscribeFixedUpdate(Update);
-                }
-            }
+            StartTween(_data.Pointer->tweenIndex);
         }
 
         private void UnlistenUpdate()
         {
-            if (_data.Pointer->updateIndex == -1) return;
-            if (_updateType == UpdateType.Update || _updateType == UpdateType.UnscaledUpdate)
-            {
-                Tweener.UnsubscribeUpdate(_data.Pointer->updateIndex);
-            }
-            else
-            {
-                Tweener.UnsubscribeFixedUpdate(_data.Pointer->updateIndex);
-            }
-            _data.Pointer->updateIndex = -1;
+            RemoveTween(_data.Pointer->tweenIndex);
         }
 
         private unsafe void Update()
         {
-            if (!_obj)
+            var managed = Managed;
+
+            if (managed.hasLink && managed.obj == null)
             {
                 Cancel();
                 return;
@@ -191,14 +201,18 @@ namespace Moths.Tweens
 
             float value = data->duration > 0 ? Mathf.Clamp01(data->time / data->duration) : 1;
 
-            if (_curve != null) value = _curve.Evaluate(value);
+            if (managed.curve != null)
+            {
+                var curve = managed.curve;
+                if (curve != null ) value = curve.Evaluate(value);
+            }
 
             if (_updater != null)
             {
-                _currentValue = _updater(_startValue, _endValue, value, _ease);
-            }
+                var currentValue = _updater(_startValue, _endValue, value, _ease);
 
-            _onValueChange?.Invoke(_context, _currentValue);
+                managed.onValueChange?.Invoke(managed.context, currentValue);
+            }
 
             if (data->time >= data->duration) Complete();
         }

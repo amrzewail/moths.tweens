@@ -39,6 +39,7 @@ namespace Moths.Tweens.Memory
                     Debug.Log($"[Allocator<{typeof(T).Name}>] Free allocated");
                 }
                 _allocations.Clear();
+                _isInitialized = false;
             }
         }
 

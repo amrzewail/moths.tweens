@@ -25,14 +25,12 @@ namespace Moths.Tweens
 
             //UpdateActions = new Dictionary<int, Action>(256);
 
-            UpdatePool = new Action[4096];
-            FixedUpdatePool = new Action[2048];
+            UpdatePool = new Action[32];
+            FixedUpdatePool = new Action[32];
         }
 
         private static void TweenUpdate()
         {
-            if (!Application.isPlaying) return;
-
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
 
@@ -45,8 +43,6 @@ namespace Moths.Tweens
 
         private static void TweenFixedUpdate()
         {
-            if (!Application.isPlaying) return;
-
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
 
@@ -93,7 +89,11 @@ namespace Moths.Tweens
             FixedUpdatePool[index] = null;
         }
 
-        public static unsafe TweenBuilder<TContext, TValue> Value<TContext, TValue>(TContext context, TValue startValue, TValue endValue, delegate*<TValue, TValue, float, Ease, TValue> updater)
+        internal static void UnsubscribeFixedUpdate(Action update)
+        {
+        }
+
+        public static unsafe TweenBuilder<TContext, TValue> Value<TContext, TValue>(TContext context, TValue startValue, TValue endValue, delegate*<TValue, TValue, float, Ease, TValue> updater) where TValue : unmanaged
         {
             return new TweenBuilder<TContext, TValue>()
                 .SetUpdater(updater)
