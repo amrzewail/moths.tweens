@@ -17,6 +17,7 @@ namespace Moths.Tweens
         internal static Action[] UpdatePool;
         internal static Action[] FixedUpdatePool;
 
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Initialize()
         {

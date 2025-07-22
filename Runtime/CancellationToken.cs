@@ -1,12 +1,11 @@
 using Moths.Tweens.Memory;
 using System;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace Moths.Tweens
 {
-    public struct CancellationToken : IDisposable
+    public unsafe struct CancellationToken : IDisposable
     {
-        private static Allocator<State> Allocator;
-
         internal struct State
         {
             public bool isCancelled;
@@ -14,22 +13,23 @@ namespace Moths.Tweens
         }
 
         private bool _isCreated;
-        private Ptr<State> _state;
+        private State* _state;
 
-        internal unsafe Ptr<State> Create()
+        internal unsafe State* Create()
         {
             if (_isCreated) return _state;
             _isCreated = true;
-            _state = Allocator.Malloc();
-            _state.Pointer->isCancelled = false;
+            _state = (State*)UnsafeUtility.MallocTracked(UnsafeUtility.SizeOf<State>(), UnsafeUtility.AlignOf<State>(), Unity.Collections.Allocator.Persistent, 0);
+            _state->isCancelled = false;
+            _state->count = 0;
             return _state;
         }
         public unsafe void Cancel()
         {
             if (!_isCreated) return;
             _isCreated = false;
-            _state.Pointer->isCancelled = true;
-            Allocator.Free(_state);
+            _state->isCancelled = true;
+            UnsafeUtility.FreeTracked(_state, Unity.Collections.Allocator.Persistent);
         }
 
         public void Dispose()

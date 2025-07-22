@@ -1,7 +1,9 @@
 using Moths.Tweens.Memory;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using UnityEngine;
 
@@ -9,13 +11,12 @@ namespace Moths.Tweens
 { 
     public unsafe partial struct Tween<TContext, TValue>
     {
-        private const int LENGTH = 4096;
-
-        private static Allocator<SharedData> Allocator;
+        private const int CAPACITY = 1024;
 
         private static int _allocatedTweensCount = 0;
         private static int _startedTweensCount = 0;
-        private static TweenInstance[] _tweens = new TweenInstance[LENGTH];
+
+        private static DynamicArray<TweenInstance> _tweens;
 
         private static readonly Action _updateAction = UpdateTweens;
         private static int _updateIndex;
@@ -27,18 +28,20 @@ namespace Moths.Tweens
             {
                 if (_wasPlaying)
                 {
-                    for (int i = 0; i < _tweens.Length; i++)
+                    if (_tweens.IsInitialized)
                     {
-                        if (!_tweens[i].isAllocated) continue;
-                        _tweens[i].shared.Dispose();
+                        for (int i = 0; i < _tweens.Length; i++)
+                        {
+                            if (!_tweens[i].isAllocated) continue;
+                            _tweens[i].shared.Dispose();
+                            _tweens[i].managed.Dispose();
+                        }
+                        _tweens.Dispose();
+                        _tweens = default;
                     }
-                    _tweens = new TweenInstance[LENGTH];
+
                     _startedTweensCount = 0;
-                    Allocator.FreeAll();
-                }
-                if (_tweens.Length != LENGTH || _wasPlaying)
-                {
-                    _tweens = new TweenInstance[LENGTH];
+                    _allocatedTweensCount = 0;
                 }
 
                 _wasPlaying = false;
@@ -59,6 +62,43 @@ namespace Moths.Tweens
 
                 _tweens[i].Update();
             }
+
+            //var job = new TweenJob();
+
+            //fixed (DynamicArray<TweenInstance>* ptr = &_tweens)
+            //{
+            //    job.tweensPtr = ptr;
+            //    JobHandle handle = job.Schedule(length, 64);
+            //    handle.Complete();
+            //}
+
+            //for (int i = 0; i < length; i++)
+            //{
+            //    if (!_tweens[i].isAllocated) continue;
+
+            //    if (!_tweens[i].isStarted)
+            //    {
+            //        if (!_tweens[i].isAwaitingPlay) continue;
+            //        StartTween(i);
+            //        if (!_tweens[i].shared.cancellationState.IsNull()) _tweens[i].shared.cancellationState.Pointer->count++;
+            //        continue;
+            //    }
+
+            //    if (_tweens[i].isCancelled)
+            //    {
+            //        CancelTween(i);
+            //        continue;
+            //    }
+
+            //    if (_tweens[i].shared.time < 0) continue;
+
+            //    //var managed = _tweens[i].managed.Value;
+            //    var shared = _tweens[i].shared;
+
+            //    _tweens[i].managed.Value.onValueChange?.Invoke(_tweens[i].managed.Value.context, _tweens[i].shared.easedValue);
+            //    if (_tweens[i].shared.time >= _tweens[i].shared.duration) CompleteTween(_tweens[i].shared.tweenIndex);
+            //}
+
         }
 
         public static Tween<TContext, TValue> Create(TweenBuilder<TContext, TValue> builder)
@@ -76,8 +116,9 @@ namespace Moths.Tweens
             shared.duration = builder.Duration;
             shared.time = -builder.Delay;
 
-            //tween._cts = builder.Cts;
-            //if (!tween._cts.IsNull()) tween._cancellationState = tween._cts.Pointer->Create();
+            shared.cts = builder.Cts;
+            shared.hasCancellation = !shared.cts.IsNull();
+            if (shared.hasCancellation) shared.cancellationState = new Ptr<CancellationToken.State>(shared.cts.Pointer->Create());
 
             ManagedData managed = new ManagedData();
             managed.context = builder.Context;
@@ -94,6 +135,8 @@ namespace Moths.Tweens
 
         private static int AllocateTween(SharedData data, ManagedData managed)
         {
+            _tweens.Create(CAPACITY);
+
             int length = _tweens.Length;
             for (int i = _allocatedTweensCount; i < _allocatedTweensCount + length; i++)
             {
@@ -103,7 +146,7 @@ namespace Moths.Tweens
                 _tweens[index] = new TweenInstance
                 {
                     shared = data,
-                    managed = managed,
+                    managed = new(managed),
                     isStarted = false,
                     isAwaitingPlay = false,
                     isAllocated = true
@@ -118,49 +161,27 @@ namespace Moths.Tweens
                 return index;
             }
 
-            // No free slot found: grow array
-            int oldLength = _tweens.Length;
-            int newLength = oldLength * 2;
+            _tweens.Resize(_tweens.Length * 2);
 
-            var newArray = new TweenInstance[newLength];
-            for (int i = 0; i < oldLength; i++)
-                newArray[i] = _tweens[i];
-
-            _tweens = newArray;
-
-            // Now retry allocation at the first free slot in extended space
-            _tweens[oldLength] = new TweenInstance
-            {
-                shared = data,
-                managed = managed,
-                isStarted = false,
-                isAwaitingPlay = false,
-                isAllocated = true
-            };
-
-            _allocatedTweensCount++;
-
-            if (_allocatedTweensCount == 1)
-            {
-                _updateIndex = Tweener.SubscribeUpdate(_updateAction);
-            }
-
-            return oldLength;
+            return AllocateTween(data, managed);
         }
 
         private static void StartTween(int index)
         {
             if (index < 0) return;
+            if (!_tweens.IsInitialized) return;
             var tween = _tweens[index];
             if (!tween.isAllocated) return;
             tween.isStarted = true;
             _tweens[index] = tween;
-            _startedTweensCount++;
+            Interlocked.Increment(ref _startedTweensCount);
         }
 
         private static void RemoveTween(int index)
         {
-            if (_tweens == null) return;
+            if (!_tweens.IsInitialized) return;
+            _tweens[index].shared.Dispose();
+            _tweens[index].managed.Dispose();
             _tweens[index] = default;
             _startedTweensCount--;
             _allocatedTweensCount--;
@@ -172,9 +193,9 @@ namespace Moths.Tweens
 
         private static void CompleteTween(int index)
         {
-            if (_tweens == null) return;
+            if (!_tweens.IsInitialized) return;
             var tween = _tweens[index];
-            var managed = tween.managed;
+            var managed = tween.managed.Value;
             managed.onComplete?.Invoke(managed.context);
             CancelTween(index);
         }

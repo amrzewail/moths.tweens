@@ -14,12 +14,15 @@ namespace Moths.Tweens
             public bool isAllocated;
             public bool isAwaitingPlay;
             public bool isStarted;
-            public ManagedData managed;
+            public ManagedHeap<ManagedData> managed;
             public SharedData shared;
+            public bool isCancelled;
 
             public unsafe void Update()
             {
-                if (managed.hasLink && managed.obj == null)
+                var m = managed.Value;
+
+                if (m.hasLink && m.obj == null)
                 {
                     CancelTween(shared.tweenIndex);
                     return;
@@ -34,16 +37,17 @@ namespace Moths.Tweens
                     return;
                 }
 
-                //float value = shared.value;
+                float value = shared.value;
 
-                //if (managed.curve != null)
-                //{
-                //    var curve = managed.curve;
-                //    if (curve != null ) value = curve.Evaluate(value);
-                //}
+                if (m.curve != null)
+                {
+                    var curve = m.curve;
+                    if (curve != null) value = curve.Evaluate(value);
+                }
 
-                managed.onValueChange?.Invoke(managed.context, shared.easedValue);
+                shared.Ease(value);
 
+                m.onValueChange?.Invoke(m.context, shared.easedValue);
                 if (shared.time >= shared.duration) CompleteTween(shared.tweenIndex);
             }
         }
@@ -64,6 +68,7 @@ namespace Moths.Tweens
             public Ease ease;
             public UpdateType updateType;
 
+            public bool hasCancellation;
             public Ptr<CancellationToken> cts;
             public Ptr<CancellationToken.State> cancellationState;
 
@@ -94,14 +99,17 @@ namespace Moths.Tweens
 
                 value = duration > 0 ? Mathf.Clamp01(time / duration) : 1;
 
-                easedValue = updater(startValue, endValue, value, ease);
-
                 return true;
             }
 
+            public void Ease(float value)
+            {
+                easedValue = updater(startValue, endValue, value, ease);
+            }
 
             public void Dispose()
             {
+                if (!hasCancellation) return;
                 if (!cancellationState.IsNull())
                 {
                     cancellationState.Pointer->count--;

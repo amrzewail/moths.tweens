@@ -30,8 +30,10 @@ namespace Moths.Tweens.Memory
 
         public void Dispose()
         {
+            if (!IsAllocated) return;
             if (!_handle.IsAllocated) return;
             _handle.Free();
+            IsAllocated = false;
         }
     }
 }

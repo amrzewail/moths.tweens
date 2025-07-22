@@ -16,11 +16,9 @@ namespace Moths.Tweens
     public unsafe partial struct Tween<TContext, TValue> where TValue : unmanaged
     {
         private int _tweenIndex;
-        private ManagedData Managed => _tweens[_tweenIndex].managed;
-        private SharedData Shared
+        private ref SharedData Shared
         {
-            get => _tweens[_tweenIndex].shared;
-            set => _tweens[_tweenIndex].shared = value;
+            get => ref _tweens[_tweenIndex].shared;
         }
 
         public bool IsPlaying => Shared.isPlaying;
