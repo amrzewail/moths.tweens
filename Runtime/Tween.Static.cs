@@ -9,96 +9,124 @@ using UnityEngine;
 
 namespace Moths.Tweens 
 { 
+    internal unsafe class Tween
+    {
+        internal unsafe struct TweenUpdate
+        {
+            public int tweenIndex;
+            public delegate*<int, void> updater;
+        }
+
+        const int CAPACITY = 1024 * 10;
+
+        public static GenericArray Tweens;
+
+        private static int _tweenUpdatesCount;
+        private static TweenUpdate[] _tweenUpdates;
+        private static Stack<int> _freeIndices;
+
+        public static int Count => _tweenUpdatesCount;
+
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void Initialize()
+        {
+            Tweens = new GenericArray(CAPACITY, 128);
+            _tweenUpdatesCount = 0;
+            _tweenUpdates = new TweenUpdate[CAPACITY];
+            _freeIndices = new Stack<int>(CAPACITY);
+            for (int i = 0; i < CAPACITY; i++) _freeIndices.Push(i);
+        }
+
+        public static void Update()
+        {
+            for (int i = 0; i < _tweenUpdates.Length; i++)
+            {
+                if (_tweenUpdates[i].updater == null) continue;
+                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
+            }
+        }
+
+        public static void RegisterUpdate(delegate*<int, void> update, int tweenIndex)
+        {
+            int index = _freeIndices.Pop();
+            _tweenUpdates[index].updater = update;
+            _tweenUpdates[index].tweenIndex = tweenIndex;
+            _tweenUpdatesCount++;
+        }
+
+        public static void UnregisterUpdate(int index)
+        {
+            _freeIndices.Push(index);
+            _tweenUpdates[index] = default;
+            _tweenUpdatesCount--;
+        }
+    }
+
+
     public unsafe partial struct Tween<TContext, TValue>
     {
-        private const int CAPACITY = 1024;
-
-        private static int _allocatedTweensCount = 0;
-        private static int _startedTweensCount = 0;
-
-        private static DynamicArray<TweenInstance> _tweens;
-
-        private static readonly Action _updateAction = UpdateTweens;
-        private static int _updateIndex;
         private static bool _wasPlaying = false;
 
-        private static unsafe void UpdateTweens()
+        //private static unsafe void UpdateTweens()
+        //{
+        //    if (!Application.isPlaying)
+        //    {
+        //        if (_wasPlaying)
+        //        {
+        //            if (_tweens.IsInitialized)
+        //            {
+        //                for (int i = 0; i < _tweens.Length; i++)
+        //                {
+        //                    if (!_tweens[i].isAllocated) continue;
+        //                    _tweens[i].shared.Dispose();
+        //                    _tweens[i].managed.Dispose();
+        //                }
+        //                _tweens.Dispose();
+        //                _tweens = default;
+        //            }
+
+        //            _startedTweensCount = 0;
+        //            _allocatedTweensCount = 0;
+        //        }
+
+        //        _wasPlaying = false;
+        //        return;
+        //    }
+
+        //    _wasPlaying = true;
+        //    int length = _tweens.Length;
+        //    for (int i = 0; i < length; i++)
+        //    {
+        //        if (!_tweens[i].isAllocated) continue;
+        //        if (!_tweens[i].isStarted)
+        //        {
+        //            if (!_tweens[i].isAwaitingPlay) continue;
+        //            StartTween(i);
+        //            if (!_tweens[i].shared.cancellationState.IsNull()) _tweens[i].shared.cancellationState.Pointer->count++;
+        //        }
+
+        //        _tweens[i].Update();
+        //    }
+        //}
+
+        private static void UpdateTween(int index)
         {
-            if (!Application.isPlaying)
+            TweenInstance tween = Tween.Tweens.Get<TweenInstance>(index);
+
+            if (!tween.isAllocated) return;
+
+            if (!tween.isStarted)
             {
-                if (_wasPlaying)
-                {
-                    if (_tweens.IsInitialized)
-                    {
-                        for (int i = 0; i < _tweens.Length; i++)
-                        {
-                            if (!_tweens[i].isAllocated) continue;
-                            _tweens[i].shared.Dispose();
-                            _tweens[i].managed.Dispose();
-                        }
-                        _tweens.Dispose();
-                        _tweens = default;
-                    }
+                if (!tween.isAwaitingPlay) return;
 
-                    _startedTweensCount = 0;
-                    _allocatedTweensCount = 0;
-                }
+                tween.isStarted = true;
 
-                _wasPlaying = false;
-                return;
+                if (!tween.shared.cancellationState.IsNull()) tween.shared.cancellationState.Pointer->count++;
             }
 
-            _wasPlaying = true;
-            int length = _tweens.Length;
-            for (int i = 0; i < length; i++)
-            {
-                if (!_tweens[i].isAllocated) continue;
-                if (!_tweens[i].isStarted)
-                {
-                    if (!_tweens[i].isAwaitingPlay) continue;
-                    StartTween(i);
-                    if (!_tweens[i].shared.cancellationState.IsNull()) _tweens[i].shared.cancellationState.Pointer->count++;
-                }
-
-                _tweens[i].Update();
-            }
-
-            //var job = new TweenJob();
-
-            //fixed (DynamicArray<TweenInstance>* ptr = &_tweens)
-            //{
-            //    job.tweensPtr = ptr;
-            //    JobHandle handle = job.Schedule(length, 64);
-            //    handle.Complete();
-            //}
-
-            //for (int i = 0; i < length; i++)
-            //{
-            //    if (!_tweens[i].isAllocated) continue;
-
-            //    if (!_tweens[i].isStarted)
-            //    {
-            //        if (!_tweens[i].isAwaitingPlay) continue;
-            //        StartTween(i);
-            //        if (!_tweens[i].shared.cancellationState.IsNull()) _tweens[i].shared.cancellationState.Pointer->count++;
-            //        continue;
-            //    }
-
-            //    if (_tweens[i].isCancelled)
-            //    {
-            //        CancelTween(i);
-            //        continue;
-            //    }
-
-            //    if (_tweens[i].shared.time < 0) continue;
-
-            //    //var managed = _tweens[i].managed.Value;
-            //    var shared = _tweens[i].shared;
-
-            //    _tweens[i].managed.Value.onValueChange?.Invoke(_tweens[i].managed.Value.context, _tweens[i].shared.easedValue);
-            //    if (_tweens[i].shared.time >= _tweens[i].shared.duration) CompleteTween(_tweens[i].shared.tweenIndex);
-            //}
-
+            tween.Update();
+            Tween.Tweens.Set(index, tween);
         }
 
         public static Tween<TContext, TValue> Create(TweenBuilder<TContext, TValue> builder)
@@ -135,66 +163,49 @@ namespace Moths.Tweens
 
         private static int AllocateTween(SharedData data, ManagedData managed)
         {
-            _tweens.Create(CAPACITY);
-
-            int length = _tweens.Length;
-            for (int i = _allocatedTweensCount; i < _allocatedTweensCount + length; i++)
+            int index = Tween.Tweens.Allocate();
+            data.tweenIndex = index;
+            var instance = new TweenInstance
             {
-                int index = i % length;
-                if (_tweens[index].isAllocated) continue;
-                data.tweenIndex = index;
-                _tweens[index] = new TweenInstance
-                {
-                    shared = data,
-                    managed = new(managed),
-                    isStarted = false,
-                    isAwaitingPlay = false,
-                    isAllocated = true
-                };
-                _allocatedTweensCount++;
+                shared = data,
+                managed = new(managed),
+                isStarted = false,
+                isAwaitingPlay = false,
+                isAllocated = true
+            };
 
-                if (_allocatedTweensCount == 1)
-                {
-                    _updateIndex = Tweener.SubscribeUpdate(_updateAction);
-                }
+            Tween.Tweens.Set(index, instance);
+            Tween.RegisterUpdate(&UpdateTween, index);
 
-                return index;
-            }
-
-            _tweens.Resize(_tweens.Length * 2);
-
-            return AllocateTween(data, managed);
+            return index;
         }
 
-        private static void StartTween(int index)
+        private static void ResumeTween(int index)
         {
+            var tween = Tween.Tweens.Get<TweenInstance>(index);
             if (index < 0) return;
-            if (!_tweens.IsInitialized) return;
-            var tween = _tweens[index];
             if (!tween.isAllocated) return;
+            if (tween.shared.isPaused) tween.shared.isPaused = false;
+            if (tween.shared.isPlaying) return;
+            tween.shared.isPlaying = true;
             tween.isStarted = true;
-            _tweens[index] = tween;
-            Interlocked.Increment(ref _startedTweensCount);
+            if (!tween.shared.cancellationState.IsNull()) tween.shared.cancellationState.Pointer->count++;
+            Tween.Tweens.Set(index, tween);
         }
 
         private static void RemoveTween(int index)
         {
-            if (!_tweens.IsInitialized) return;
-            _tweens[index].shared.Dispose();
-            _tweens[index].managed.Dispose();
-            _tweens[index] = default;
-            _startedTweensCount--;
-            _allocatedTweensCount--;
-            if (_allocatedTweensCount == 0)
-            {
-                Tweener.UnsubscribeUpdate(_updateIndex);
-            }
+            var tween = Tween.Tweens.Get<TweenInstance>(index);
+            tween.shared.Dispose();
+            tween.managed.Dispose();
+
+            Tween.Tweens.Free(index);
+            Tween.UnregisterUpdate(index);
         }
 
         private static void CompleteTween(int index)
         {
-            if (!_tweens.IsInitialized) return;
-            var tween = _tweens[index];
+            var tween = Tween.Tweens.Get<TweenInstance>(index);
             var managed = tween.managed.Value;
             managed.onComplete?.Invoke(managed.context);
             CancelTween(index);

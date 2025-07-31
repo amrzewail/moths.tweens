@@ -14,7 +14,8 @@ namespace Moths.Tweens
             public bool isAllocated;
             public bool isAwaitingPlay;
             public bool isStarted;
-            public ManagedHeap<ManagedData> managed;
+            public int managedIndex;
+            public ManagedPtr<ManagedData> managed;
             public SharedData shared;
             public bool isCancelled;
 

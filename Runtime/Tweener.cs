@@ -7,7 +7,7 @@ namespace Moths.Tweens
 {
     public static class Tweener
     {
-        public struct TweenPlayerLoop { }
+        private struct TweenPlayerLoop { }
 
         internal static float DeltaTime;
         internal static float UnscaledDeltaTime;
@@ -35,10 +35,15 @@ namespace Moths.Tweens
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
 
-            for (int i = 0; i < UpdatePool.Length; i++)
+            //for (int i = 0; i < UpdatePool.Length; i++)
+            //{
+            //    if (UpdatePool[i] == null) continue; 
+            //    UpdatePool[i].Invoke();
+            //}
+
+            if (Tween.Count > 0)
             {
-                if (UpdatePool[i] == null) continue; 
-                UpdatePool[i].Invoke();
+                Tween.Update();
             }
         }
 
@@ -47,11 +52,11 @@ namespace Moths.Tweens
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
 
-            for (int i = 0; i < FixedUpdatePool.Length; i++)
-            {
-                if (FixedUpdatePool[i] == null) continue;
-                FixedUpdatePool[i].Invoke();
-            }
+            //for (int i = 0; i < FixedUpdatePool.Length; i++)
+            //{
+            //    if (FixedUpdatePool[i] == null) continue;
+            //    FixedUpdatePool[i].Invoke();
+            //}
         }
 
         internal static int SubscribeUpdate(Action update)

@@ -16,9 +16,15 @@ namespace Moths.Tweens
     public unsafe partial struct Tween<TContext, TValue> where TValue : unmanaged
     {
         private int _tweenIndex;
-        private ref SharedData Shared
+        private SharedData Shared
         {
-            get => ref _tweens[_tweenIndex].shared;
+            get => Tween.Tweens.Get<TweenInstance>(_tweenIndex).shared;
+            set
+            {
+                var tween = Tween.Tweens.Get<TweenInstance>(_tweenIndex);
+                tween.shared = value;
+                Tween.Tweens.Set(_tweenIndex, tween);
+            }
         }
 
         public bool IsPlaying => Shared.isPlaying;
@@ -31,19 +37,16 @@ namespace Moths.Tweens
         public void Play()
         {
             if (_tweenIndex == -1) return;
-            if (!_tweens[_tweenIndex].isAwaitingPlay)
+
+            var tween = Tween.Tweens.Get<TweenInstance>(_tweenIndex);
+            if (!tween.isAwaitingPlay)
             {
-                _tweens[_tweenIndex].isAwaitingPlay = true;
+                tween.isAwaitingPlay = true;
+                Tween.Tweens.Set(_tweenIndex, tween);
                 return;
             }
 
-            SharedData shared = Shared;
-            if (IsPaused) shared.isPaused = false;
-            if (IsPlaying) return;
-            shared.isPlaying = true;
-            Shared = shared;
-            StartTween(_tweenIndex);
-            if (!shared.cancellationState.IsNull()) shared.cancellationState.Pointer->count++;
+            ResumeTween(_tweenIndex);
         }
 
         public void Pause()
