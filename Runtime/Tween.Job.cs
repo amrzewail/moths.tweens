@@ -14,37 +14,35 @@ namespace Moths.Tweens
 
             public void Execute(int index)
             {
-                var tweens = *tweensPtr;
+                //var tweens = *tweensPtr;
 
-                if (!tweens[index].isAllocated) return;
-                if (!tweens[index].isStarted) return;
+                //if (!tweens[index].isAllocated) return;
+                //if (!tweens[index].isStarted) return;
 
-                var managed = tweens[index].managed.Value;
+                //if (tweens[index].shared.hasLink && managed.obj == null)
+                //{
+                //    tweens[index].isCancelled = true;
+                //    return;
+                //}
 
-                if (managed.hasLink && managed.obj == null)
-                {
-                    tweens[index].isCancelled = true;
-                    return;
-                }
+                //if (!tweens[index].shared.Update(out var canceled))
+                //{
+                //    if (canceled)
+                //    {
+                //        tweens[index].isCancelled = true;
+                //    }
+                //    return;
+                //}
 
-                if (!tweens[index].shared.Update(out var canceled))
-                {
-                    if (canceled)
-                    {
-                        tweens[index].isCancelled = true;
-                    }
-                    return;
-                }
+                //float value = tweens[index].shared.value;
 
-                float value = tweens[index].shared.value;
+                //if (managed.curve != null)
+                //{
+                //    var curve = managed.curve;
+                //    if (curve != null) value = curve.Evaluate(value);
+                //}
 
-                if (managed.curve != null)
-                {
-                    var curve = managed.curve;
-                    if (curve != null) value = curve.Evaluate(value);
-                }
-
-                tweens[index].shared.Ease(value);
+                //tweens[index].shared.Ease(value);
             }
         }
     }

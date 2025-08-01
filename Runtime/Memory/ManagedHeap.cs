@@ -1,23 +1,32 @@
 using System;
+using System.Collections.Generic;
 
 namespace Moths.Tweens.Memory
 {
-    public struct ManagedHeap<T>
+    public struct ManagedHeap<T> where T : class
     {
-        private static (T obj, bool occupied)[] _pool;
+        private static T[] _pool;
+        private static Stack<int> _freeIndices;
         private static int _capacity;
-        private static int _count;
 
         private readonly int _index;
+
+        public bool IsAllocated { get; private set; }
 
         static ManagedHeap()
         {
             _capacity = 64;
-            _pool = new (T, bool)[_capacity];
+            _pool = new T[_capacity];
+            _freeIndices = new Stack<int>(_capacity);
+            for (int i = 0; i < _capacity; i++)
+            {
+                _freeIndices.Push(i);
+            }
         }
 
         private ManagedHeap(int index)
         {
+            IsAllocated = true;
             _index = index;
         }
 
@@ -28,31 +37,24 @@ namespace Moths.Tweens.Memory
 
         public static ManagedHeap<T> Allocate(T value)
         {
-            for (int i = 0; i < _capacity; i++)
+            if (_freeIndices.Count == 0)
             {
-                if (!_pool[i].occupied)
-                {
-                    _pool[i] = (value, true);
-                    _count++;
-                    return new ManagedHeap<T>(i);
-                }
+                Expand();
             }
-
-            Expand();
-            return Allocate(value); // Try again after expanding
+            var index = _freeIndices.Pop();
+            _pool[index] = value;
+            return new ManagedHeap<T>(index);
         }
 
-        public ref T Value => ref _pool[_index].obj;
-
-        public bool IsAlive => _index >= 0 && _index < _capacity && _pool[_index].occupied;
+        public ref T Value => ref _pool[_index];
 
         public void Dispose()
         {
-            if (_index < 0 || _index >= _capacity) return;
-            if (!_pool[_index].occupied) return;
+            if (!IsAllocated) return;
 
-            _pool[_index] = (default, false);
-            _count--;
+            IsAllocated = false;
+            _pool[_index] = null;
+            _freeIndices.Push(_index);
         }
 
         private static void Expand()
@@ -60,6 +62,8 @@ namespace Moths.Tweens.Memory
             int newCapacity = _capacity * 2;
 
             Array.Resize(ref _pool, newCapacity);
+
+            for (int i = _capacity; i < newCapacity; i++) _freeIndices.Push(i);
 
             _capacity = newCapacity;
         }

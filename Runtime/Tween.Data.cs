@@ -11,25 +11,18 @@ namespace Moths.Tweens
     {
         internal struct TweenInstance
         {
-            public bool isAllocated;
-            public bool isAwaitingPlay;
-            public bool isStarted;
-            public int managedIndex;
-            public ManagedPtr<ManagedData> managed;
             public SharedData shared;
-            public bool isCancelled;
+            public bool isAllocated;
 
-            public unsafe void Update()
+            public unsafe void Update(bool complete)
             {
-                var m = managed.Value;
-
-                if (m.hasLink && m.obj == null)
+                if (shared.hasLink && shared.link.IsAllocated && shared.link.Value == null)
                 {
                     CancelTween(shared.tweenIndex);
                     return;
                 }
 
-                if (!shared.Update(out var canceled))
+                if (!shared.Update(out var canceled, complete))
                 {
                     if (canceled)
                     {
@@ -40,16 +33,21 @@ namespace Moths.Tweens
 
                 float value = shared.value;
 
-                if (m.curve != null)
+                if (shared.curve.IsAllocated)
                 {
-                    var curve = m.curve;
+                    var curve = shared.curve.Value;
                     if (curve != null) value = curve.Evaluate(value);
                 }
 
                 shared.Ease(value);
 
-                m.onValueChange?.Invoke(m.context, shared.easedValue);
-                if (shared.time >= shared.duration) CompleteTween(shared.tweenIndex);
+                if (shared.onValueChange.IsAllocated && shared.context.IsAllocated)
+                {
+                    var valueChange = (Action<TContext, TValue>)shared.onValueChange.Value;
+                    valueChange?.Invoke((TContext)shared.context.Value, shared.easedValue);
+                }
+
+                if (shared.time >= shared.duration && !complete) CompleteTween(shared.tweenIndex, false);
             }
         }
 
@@ -58,16 +56,23 @@ namespace Moths.Tweens
             public int tweenIndex;
 
             public float time;
-            public float duration;
-
             public float value;
-
             public TValue startValue;
             public TValue endValue;
             public TValue easedValue;
-            public delegate*<TValue, TValue, float, Ease, TValue> updater;
+
+            public float duration;
             public Ease ease;
+
+            public delegate*<TValue, TValue, float, Ease, TValue> updater;
             public UpdateType updateType;
+
+            public bool hasLink;
+            public ManagedHeap<object> context;
+            public ManagedHeap<AnimationCurve> curve;
+            public ManagedHeap<object> link;
+            public ManagedHeap<object> onValueChange;
+            public ManagedHeap<object> onComplete;
 
             public bool hasCancellation;
             public Ptr<CancellationToken> cts;
@@ -78,10 +83,17 @@ namespace Moths.Tweens
             public bool isPaused;
             public bool isCanceled;
 
-            public bool Update(out bool canceled)
+            public bool Update(out bool canceled, bool complete)
             {
                 if (canceled = isCanceled) return false;
                 if (canceled = !cancellationState.IsNull() && cancellationState.Pointer->isCancelled) return false;
+
+                if (complete)
+                {
+                    value = 1;
+                    return true;
+                }
+
                 if (isPaused) return false;
 
                 float deltaTime = updateType switch
@@ -110,27 +122,21 @@ namespace Moths.Tweens
 
             public void Dispose()
             {
+                context.Dispose();
+                curve.Dispose();
+                link.Dispose();
+                onValueChange.Dispose();
+                onComplete.Dispose();
+
                 if (!hasCancellation) return;
-                if (!cancellationState.IsNull())
+                if (cancellationState.IsNull()) return;
+                cancellationState.Pointer->count--;
+                if (cancellationState.Pointer->count == 0)
                 {
-                    cancellationState.Pointer->count--;
-                    if (cancellationState.Pointer->count == 0)
-                    {
-                        if (!cts.IsNull()) cts.Pointer->Dispose();
-                    }
+                    if (!cts.IsNull()) cts.Pointer->Dispose();
                 }
             }
         };
-
-        internal struct ManagedData
-        {
-            public TContext context;
-            public AnimationCurve curve;
-            public bool hasLink;
-            public object obj;
-            public Action<TContext, TValue> onValueChange;
-            public Action<TContext> onComplete;
-        }
 
     }
 }

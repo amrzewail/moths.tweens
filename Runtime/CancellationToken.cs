@@ -24,6 +24,7 @@ namespace Moths.Tweens
             _state->count = 0;
             return _state;
         }
+
         public unsafe void Cancel()
         {
             if (!_isCreated) return;

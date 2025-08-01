@@ -14,10 +14,12 @@ namespace Moths.Tweens
         internal unsafe struct TweenUpdate
         {
             public int tweenIndex;
+            public bool isFixedUpdate;
             public delegate*<int, void> updater;
+            public delegate*<int, object, bool, void> linkCanceller;
         }
 
-        const int CAPACITY = 1024 * 10;
+        const int CAPACITY = 1024 * 4;
 
         public static GenericArray Tweens;
 
@@ -31,27 +33,57 @@ namespace Moths.Tweens
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Initialize()
         {
-            Tweens = new GenericArray(CAPACITY, 128);
+            Tweens = new GenericArray(CAPACITY, 256);
             _tweenUpdatesCount = 0;
             _tweenUpdates = new TweenUpdate[CAPACITY];
             _freeIndices = new Stack<int>(CAPACITY);
             for (int i = 0; i < CAPACITY; i++) _freeIndices.Push(i);
         }
 
+        ~Tween()
+        {
+            Tweens.Dispose();
+        }
+
         public static void Update()
         {
             for (int i = 0; i < _tweenUpdates.Length; i++)
             {
+                if (_tweenUpdates[i].isFixedUpdate) continue;
                 if (_tweenUpdates[i].updater == null) continue;
                 _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
             }
         }
 
-        public static void RegisterUpdate(delegate*<int, void> update, int tweenIndex)
+        public static void FixedUpdate()
+        {
+            for (int i = 0; i < _tweenUpdates.Length; i++)
+            {
+                if (!_tweenUpdates[i].isFixedUpdate) continue;
+                if (_tweenUpdates[i].updater == null) continue;
+                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
+            }
+        }
+
+        public static void CancelWithLink(object link, bool complete)
+        {
+            if (link == null) return;
+
+            for (int i = 0; i < _tweenUpdates.Length; i++)
+            {
+                if (_tweenUpdates[i].linkCanceller == null) continue;
+                _tweenUpdates[i].linkCanceller(_tweenUpdates[i].tweenIndex, link, complete);
+            }
+        }
+
+
+        public static void RegisterUpdate(int tweenIndex, bool fixedUpdate, delegate*<int, void> update, delegate*<int, object, bool, void> canceller)
         {
             int index = _freeIndices.Pop();
             _tweenUpdates[index].updater = update;
+            _tweenUpdates[index].isFixedUpdate = fixedUpdate;
             _tweenUpdates[index].tweenIndex = tweenIndex;
+            _tweenUpdates[index].linkCanceller = canceller;
             _tweenUpdatesCount++;
         }
 
@@ -112,26 +144,37 @@ namespace Moths.Tweens
 
         private static void UpdateTween(int index)
         {
-            TweenInstance tween = Tween.Tweens.Get<TweenInstance>(index);
+            ref TweenInstance tween = ref Tween.Tweens.GetRef<TweenInstance>(index);
 
             if (!tween.isAllocated) return;
 
-            if (!tween.isStarted)
-            {
-                if (!tween.isAwaitingPlay) return;
+            if (!tween.shared.isPlaying) return;
 
-                tween.isStarted = true;
-
-                if (!tween.shared.cancellationState.IsNull()) tween.shared.cancellationState.Pointer->count++;
-            }
-
-            tween.Update();
-            Tween.Tweens.Set(index, tween);
+            tween.Update(false);
         }
 
-        public static Tween<TContext, TValue> Create(TweenBuilder<TContext, TValue> builder)
+        private static void CancelWithLink(int index, object link, bool complete)
         {
-            var tween = new Tween<TContext, TValue>();
+            ref TweenInstance tween = ref Tween.Tweens.GetRef<TweenInstance>(index);
+
+            if (!tween.isAllocated) return;
+            if (!tween.shared.hasLink || !tween.shared.link.IsAllocated) return;
+
+            var tweenLink = tween.shared.link.Value;
+
+            if (tweenLink == link && complete)
+            {
+                CompleteTween(index, true);
+            }
+            else
+            {
+                CancelTween(index);
+            }
+        }
+
+        public static void Create(ref TweenBuilder<TContext, TValue> builder, out Tween<TContext, TValue> tween)
+        {
+            tween = new Tween<TContext, TValue>();
 
             SharedData shared = new SharedData();
 
@@ -146,68 +189,64 @@ namespace Moths.Tweens
 
             shared.cts = builder.Cts;
             shared.hasCancellation = !shared.cts.IsNull();
-            if (shared.hasCancellation) shared.cancellationState = new Ptr<CancellationToken.State>(shared.cts.Pointer->Create());
+            if (shared.hasCancellation)
+            {
+                shared.cancellationState = new Ptr<CancellationToken.State>(shared.cts.Pointer->Create());
+                shared.cancellationState.Pointer->count++;
+            }
 
-            ManagedData managed = new ManagedData();
-            managed.context = builder.Context;
-            managed.curve = builder.Curve;
-            managed.obj = builder.Obj;
-            managed.hasLink = managed.obj != null;
-            managed.onValueChange = builder.OnValueChange;
-            managed.onComplete = builder.OnComplete;
+            shared.context = new(builder.Context);
+            shared.curve = new(builder.Curve);
+            if (builder.Link != null) shared.link = new(builder.Link);
+            shared.hasLink = builder.Link != null;
+            shared.onValueChange = new(builder.OnValueChange);
+            shared.onComplete = new(builder.OnComplete);
 
-            tween._tweenIndex = AllocateTween(shared, managed);
-
-            return tween;
-        }
-
-        private static int AllocateTween(SharedData data, ManagedData managed)
-        {
             int index = Tween.Tweens.Allocate();
-            data.tweenIndex = index;
+            shared.tweenIndex = index;
             var instance = new TweenInstance
             {
-                shared = data,
-                managed = new(managed),
-                isStarted = false,
-                isAwaitingPlay = false,
+                shared = shared,
                 isAllocated = true
             };
 
-            Tween.Tweens.Set(index, instance);
-            Tween.RegisterUpdate(&UpdateTween, index);
+            Tween.Tweens.Set(index, ref instance, 0);
+            Tween.RegisterUpdate(index, ((int)shared.updateType & 1) > 0, &UpdateTween, &CancelWithLink);
 
-            return index;
+            tween._tweenIndex = index;
         }
 
         private static void ResumeTween(int index)
         {
-            var tween = Tween.Tweens.Get<TweenInstance>(index);
             if (index < 0) return;
+            ref var tween = ref Tween.Tweens.GetRef<TweenInstance>(index);
             if (!tween.isAllocated) return;
-            if (tween.shared.isPaused) tween.shared.isPaused = false;
-            if (tween.shared.isPlaying) return;
-            tween.shared.isPlaying = true;
-            tween.isStarted = true;
-            if (!tween.shared.cancellationState.IsNull()) tween.shared.cancellationState.Pointer->count++;
-            Tween.Tweens.Set(index, tween);
+            tween.shared.isPaused = false;
         }
 
         private static void RemoveTween(int index)
         {
-            var tween = Tween.Tweens.Get<TweenInstance>(index);
+            ref var tween = ref Tween.Tweens.GetRef<TweenInstance>(index);
+            tween.isAllocated = false;
             tween.shared.Dispose();
-            tween.managed.Dispose();
 
             Tween.Tweens.Free(index);
             Tween.UnregisterUpdate(index);
         }
 
-        private static void CompleteTween(int index)
+        private static void CompleteTween(int index, bool update)
         {
-            var tween = Tween.Tweens.Get<TweenInstance>(index);
-            var managed = tween.managed.Value;
-            managed.onComplete?.Invoke(managed.context);
+            Tween.Tweens.Get<TweenInstance>(index, out var tween);
+            var shared = tween.shared;
+            if (update)
+            {
+                tween.Update(true);
+            }
+            if (shared.onComplete.IsAllocated && shared.context.IsAllocated)
+            {
+                var complete = (Action<TContext>)shared.onComplete.Value;
+                complete?.Invoke((TContext)shared.context.Value);
+            }
             CancelTween(index);
         }
 

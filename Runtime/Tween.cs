@@ -13,17 +13,16 @@ namespace Moths.Tweens
         UnscaledFixedUpdate,
     };
 
-    public unsafe partial struct Tween<TContext, TValue> where TValue : unmanaged
+    public unsafe partial struct Tween<TContext, TValue> 
+        where TValue : unmanaged
+        where TContext : class
     {
         private int _tweenIndex;
-        private SharedData Shared
+        private ref SharedData Shared
         {
-            get => Tween.Tweens.Get<TweenInstance>(_tweenIndex).shared;
-            set
+            get
             {
-                var tween = Tween.Tweens.Get<TweenInstance>(_tweenIndex);
-                tween.shared = value;
-                Tween.Tweens.Set(_tweenIndex, tween);
+                return ref Tween.Tweens.GetRef<TweenInstance>(_tweenIndex).shared;
             }
         }
 
@@ -36,13 +35,13 @@ namespace Moths.Tweens
 
         public void Play()
         {
-            if (_tweenIndex == -1) return;
+            if (_tweenIndex < 0) return;
 
-            var tween = Tween.Tweens.Get<TweenInstance>(_tweenIndex);
-            if (!tween.isAwaitingPlay)
+            ref var tween = ref Tween.Tweens.GetRef<TweenInstance>(_tweenIndex);
+
+            if (!IsPlaying)
             {
-                tween.isAwaitingPlay = true;
-                Tween.Tweens.Set(_tweenIndex, tween);
+                Shared.isPlaying = true;
                 return;
             }
 
@@ -52,9 +51,7 @@ namespace Moths.Tweens
         public void Pause()
         {
             if (IsPaused) return;
-            var shared = Shared;
-            shared.isPaused = true;
-            Shared = shared;
+            Shared.isPaused = true;
         }
 
         public void Cancel()
@@ -66,7 +63,7 @@ namespace Moths.Tweens
         public void Complete()
         {
             if (!IsPlaying) return;
-            CompleteTween(_tweenIndex);
+            CompleteTween(_tweenIndex, true);
         }
     }
 }

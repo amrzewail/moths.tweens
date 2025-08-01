@@ -11,6 +11,8 @@ namespace Moths.Tweens.Memory
         public T Value => IsAllocated ? (T)_handle.Target : default;
         public bool IsAllocated { get; private set; }
 
+        public static implicit operator ManagedPtr<T>(T obj) => new(obj);
+
         public bool IsAlive
         {
             get
@@ -24,6 +26,11 @@ namespace Moths.Tweens.Memory
         }
         public ManagedPtr(T target)
         {
+            if (target == null)
+            {
+                this = default;
+                return;
+            }
             IsAllocated = true;
             _handle = GCHandle.Alloc(target, GCHandleType.Normal);
         }

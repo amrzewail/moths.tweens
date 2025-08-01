@@ -12,34 +12,20 @@ namespace Moths.Tweens
         internal static float DeltaTime;
         internal static float UnscaledDeltaTime;
 
-        //internal static Dictionary<int, Action> UpdateActions;
-
-        internal static Action[] UpdatePool;
-        internal static Action[] FixedUpdatePool;
-
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Initialize()
         {
             PlayerLoopUtility.AddSystem<TweenPlayerLoop, Update.ScriptRunBehaviourUpdate>(TweenUpdate);
             PlayerLoopUtility.AddSystem<TweenPlayerLoop, FixedUpdate>(TweenFixedUpdate);
-
-            //UpdateActions = new Dictionary<int, Action>(256);
-
-            UpdatePool = new Action[32];
-            FixedUpdatePool = new Action[32];
         }
 
         private static void TweenUpdate()
         {
+            if (!Application.isPlaying) return;
+            
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
-
-            //for (int i = 0; i < UpdatePool.Length; i++)
-            //{
-            //    if (UpdatePool[i] == null) continue; 
-            //    UpdatePool[i].Invoke();
-            //}
 
             if (Tween.Count > 0)
             {
@@ -49,87 +35,66 @@ namespace Moths.Tweens
 
         private static void TweenFixedUpdate()
         {
+            if (!Application.isPlaying) return;
+
             DeltaTime = Time.deltaTime;
             UnscaledDeltaTime = Time.unscaledDeltaTime;
 
-            //for (int i = 0; i < FixedUpdatePool.Length; i++)
-            //{
-            //    if (FixedUpdatePool[i] == null) continue;
-            //    FixedUpdatePool[i].Invoke();
-            //}
-        }
-
-        internal static int SubscribeUpdate(Action update)
-        {
-            for (int i = 0; i < UpdatePool.Length; i++)
+            if (Tween.Count > 0)
             {
-                if (UpdatePool[i] == null)
-                {
-                    UpdatePool[i] = update;
-                    return i;
-                }
+                Tween.FixedUpdate();
             }
-            return -1;
         }
 
-        internal static int SubscribeFixedUpdate(Action fixedUpdate)
+        public static void CancelAll(object link)
         {
-            for (int i = 0; i < FixedUpdatePool.Length; i++)
-            {
-                if (FixedUpdatePool[i] == null)
-                {
-                    FixedUpdatePool[i] = fixedUpdate;
-                    return i;
-                }
-            }
-            return -1;
+            Tween.CancelWithLink(link, false);
         }
 
-        internal static void UnsubscribeUpdate(int index)
+        public static void CompleteAll(object link)
         {
-            UpdatePool[index] = null;
+            Tween.CancelWithLink(link, true);
         }
 
-        internal static void UnsubscribeFixedUpdate(int index)
-        {
-            FixedUpdatePool[index] = null;
-        }
-
-        internal static void UnsubscribeFixedUpdate(Action update)
-        {
-        }
-
-        public static unsafe TweenBuilder<TContext, TValue> Value<TContext, TValue>(TContext context, TValue startValue, TValue endValue, delegate*<TValue, TValue, float, Ease, TValue> updater) where TValue : unmanaged
+        public static unsafe TweenBuilder<TContext, TValue> Value<TContext, TValue>(TContext context, TValue startValue, TValue endValue, delegate*<TValue, TValue, float, Ease, TValue> updater) 
+        where TValue : unmanaged
+        where TContext : class
         {
             return new TweenBuilder<TContext, TValue>()
-                .SetUpdater(updater)
                 .SetContext(context)
+                .SetUpdater(updater)
                 .SetStartValue(startValue)
                 .SetEndValue(endValue)
-                .SetDuration(1);
+                .SetDuration(1)
+                .SetLink(context);
         }
 
         public static unsafe TweenBuilder<TContext, float> Value<TContext>(TContext context, float startValue, float endValue)
+        where TContext : class
         {
             return Value(context, startValue, endValue, &Updaters.FloatUpdater.Update);
         }
 
         public static unsafe TweenBuilder<TContext, Vector3> Value<TContext>(TContext context, Vector3 startValue, Vector3 endValue)
+        where TContext : class
         {
             return Value(context, startValue, endValue, &Updaters.Vector3Updater.Update);
         }
 
         public static unsafe TweenBuilder<TContext, Vector2> Value<TContext>(TContext context, Vector2 startValue, Vector2 endValue)
+        where TContext : class
         {
             return Value(context, startValue, endValue, &Updaters.Vector2Updater.Update);
         }
 
         public static unsafe TweenBuilder<TContext, Quaternion> Value<TContext>(TContext context, Quaternion startValue, Quaternion endValue)
+        where TContext : class
         {
             return Value(context, startValue, endValue, &Updaters.QuaternionUpdater.Update);
         }
 
         public static unsafe TweenBuilder<TContext, Color> Value<TContext>(TContext context, Color startValue, Color endValue)
+        where TContext : class
         {
             return Value(context, startValue, endValue, &Updaters.ColorUpdater.Update);
         }
