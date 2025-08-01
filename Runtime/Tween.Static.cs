@@ -1,146 +1,15 @@
 using Moths.Tweens.Memory;
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
-using UnityEngine;
 
 namespace Moths.Tweens 
 { 
-    internal unsafe class Tween
-    {
-        internal unsafe struct TweenUpdate
-        {
-            public int tweenIndex;
-            public bool isFixedUpdate;
-            public delegate*<int, void> updater;
-            public delegate*<int, object, bool, void> linkCanceller;
-        }
-
-        const int CAPACITY = 1024 * 4;
-
-        public static GenericArray Tweens;
-
-        private static int _tweenUpdatesCount;
-        private static TweenUpdate[] _tweenUpdates;
-        private static Stack<int> _freeIndices;
-
-        public static int Count => _tweenUpdatesCount;
-
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        private static void Initialize()
-        {
-            Tweens = new GenericArray(CAPACITY, 256);
-            _tweenUpdatesCount = 0;
-            _tweenUpdates = new TweenUpdate[CAPACITY];
-            _freeIndices = new Stack<int>(CAPACITY);
-            for (int i = 0; i < CAPACITY; i++) _freeIndices.Push(i);
-        }
-
-        ~Tween()
-        {
-            Tweens.Dispose();
-        }
-
-        public static void Update()
-        {
-            for (int i = 0; i < _tweenUpdates.Length; i++)
-            {
-                if (_tweenUpdates[i].isFixedUpdate) continue;
-                if (_tweenUpdates[i].updater == null) continue;
-                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
-            }
-        }
-
-        public static void FixedUpdate()
-        {
-            for (int i = 0; i < _tweenUpdates.Length; i++)
-            {
-                if (!_tweenUpdates[i].isFixedUpdate) continue;
-                if (_tweenUpdates[i].updater == null) continue;
-                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
-            }
-        }
-
-        public static void CancelWithLink(object link, bool complete)
-        {
-            if (link == null) return;
-
-            for (int i = 0; i < _tweenUpdates.Length; i++)
-            {
-                if (_tweenUpdates[i].linkCanceller == null) continue;
-                _tweenUpdates[i].linkCanceller(_tweenUpdates[i].tweenIndex, link, complete);
-            }
-        }
-
-
-        public static void RegisterUpdate(int tweenIndex, bool fixedUpdate, delegate*<int, void> update, delegate*<int, object, bool, void> canceller)
-        {
-            int index = _freeIndices.Pop();
-            _tweenUpdates[index].updater = update;
-            _tweenUpdates[index].isFixedUpdate = fixedUpdate;
-            _tweenUpdates[index].tweenIndex = tweenIndex;
-            _tweenUpdates[index].linkCanceller = canceller;
-            _tweenUpdatesCount++;
-        }
-
-        public static void UnregisterUpdate(int index)
-        {
-            _freeIndices.Push(index);
-            _tweenUpdates[index] = default;
-            _tweenUpdatesCount--;
-        }
-    }
-
-
     public unsafe partial struct Tween<TContext, TValue>
     {
         private static bool _wasPlaying = false;
-
-        //private static unsafe void UpdateTweens()
-        //{
-        //    if (!Application.isPlaying)
-        //    {
-        //        if (_wasPlaying)
-        //        {
-        //            if (_tweens.IsInitialized)
-        //            {
-        //                for (int i = 0; i < _tweens.Length; i++)
-        //                {
-        //                    if (!_tweens[i].isAllocated) continue;
-        //                    _tweens[i].shared.Dispose();
-        //                    _tweens[i].managed.Dispose();
-        //                }
-        //                _tweens.Dispose();
-        //                _tweens = default;
-        //            }
-
-        //            _startedTweensCount = 0;
-        //            _allocatedTweensCount = 0;
-        //        }
-
-        //        _wasPlaying = false;
-        //        return;
-        //    }
-
-        //    _wasPlaying = true;
-        //    int length = _tweens.Length;
-        //    for (int i = 0; i < length; i++)
-        //    {
-        //        if (!_tweens[i].isAllocated) continue;
-        //        if (!_tweens[i].isStarted)
-        //        {
-        //            if (!_tweens[i].isAwaitingPlay) continue;
-        //            StartTween(i);
-        //            if (!_tweens[i].shared.cancellationState.IsNull()) _tweens[i].shared.cancellationState.Pointer->count++;
-        //        }
-
-        //        _tweens[i].Update();
-        //    }
-        //}
 
         private static void UpdateTween(int index)
         {

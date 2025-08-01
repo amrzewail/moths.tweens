@@ -1,69 +1,91 @@
 using Moths.Tweens.Memory;
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Moths.Tweens
+namespace Moths.Tweens 
 {
-    public enum UpdateType
+    internal unsafe class Tween
     {
-        Update,
-        FixedUpdate,
-        UnscaledUpdate,
-        UnscaledFixedUpdate,
-    };
-
-    public unsafe partial struct Tween<TContext, TValue> 
-        where TValue : unmanaged
-        where TContext : class
-    {
-        private int _tweenIndex;
-        private ref SharedData Shared
+        internal unsafe struct TweenUpdate
         {
-            get
+            public int tweenIndex;
+            public bool isFixedUpdate;
+            public delegate*<int, void> updater;
+            public delegate*<int, object, bool, void> linkCanceller;
+        }
+
+        const int CAPACITY = 1024 * 4;
+
+        public static GenericArray Tweens;
+
+        private static int _tweenUpdatesCount;
+        private static TweenUpdate[] _tweenUpdates;
+        private static Stack<int> _freeIndices;
+
+        public static int Count => _tweenUpdatesCount;
+
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void Initialize()
+        {
+            Tweens = new GenericArray(CAPACITY, 256);
+            _tweenUpdatesCount = 0;
+            _tweenUpdates = new TweenUpdate[CAPACITY];
+            _freeIndices = new Stack<int>(CAPACITY);
+            for (int i = 0; i < CAPACITY; i++) _freeIndices.Push(i);
+        }
+
+        ~Tween()
+        {
+            Tweens.Dispose();
+        }
+
+        public static void Update()
+        {
+            for (int i = 0; i < _tweenUpdates.Length; i++)
             {
-                return ref Tween.Tweens.GetRef<TweenInstance>(_tweenIndex).shared;
+                if (_tweenUpdates[i].isFixedUpdate) continue;
+                if (_tweenUpdates[i].updater == null) continue;
+                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
             }
         }
 
-        public bool IsPlaying => Shared.isPlaying;
-        public bool IsPaused => IsPlaying ? Shared.isPaused : false;
-        public float Time => Mathf.Max(IsPlaying ? Shared.time : 0, 0);
-        public float Duration => Shared.duration;
-        public float Value => Duration > 0 ? Mathf.Clamp01(Time / Duration) : 1;
-        public TValue EasedValue => Shared.updater(Shared.startValue, Shared.endValue, Value, Shared.ease);
-
-        public void Play()
+        public static void FixedUpdate()
         {
-            if (_tweenIndex < 0) return;
-
-            ref var tween = ref Tween.Tweens.GetRef<TweenInstance>(_tweenIndex);
-
-            if (!IsPlaying)
+            for (int i = 0; i < _tweenUpdates.Length; i++)
             {
-                Shared.isPlaying = true;
-                return;
+                if (!_tweenUpdates[i].isFixedUpdate) continue;
+                if (_tweenUpdates[i].updater == null) continue;
+                _tweenUpdates[i].updater(_tweenUpdates[i].tweenIndex);
             }
-
-            ResumeTween(_tweenIndex);
         }
 
-        public void Pause()
+        public static void CancelWithLink(object link, bool complete)
         {
-            if (IsPaused) return;
-            Shared.isPaused = true;
+            if (link == null) return;
+
+            for (int i = 0; i < _tweenUpdates.Length; i++)
+            {
+                if (_tweenUpdates[i].linkCanceller == null) continue;
+                _tweenUpdates[i].linkCanceller(_tweenUpdates[i].tweenIndex, link, complete);
+            }
         }
 
-        public void Cancel()
+        public static void RegisterUpdate(int tweenIndex, bool fixedUpdate, delegate*<int, void> update, delegate*<int, object, bool, void> canceller)
         {
-            if (!IsPlaying) return;
-            CancelTween(_tweenIndex);
+            int index = _freeIndices.Pop();
+            _tweenUpdates[index].updater = update;
+            _tweenUpdates[index].isFixedUpdate = fixedUpdate;
+            _tweenUpdates[index].tweenIndex = tweenIndex;
+            _tweenUpdates[index].linkCanceller = canceller;
+            _tweenUpdatesCount++;
         }
 
-        public void Complete()
+        public static void UnregisterUpdate(int index)
         {
-            if (!IsPlaying) return;
-            CompleteTween(_tweenIndex, true);
+            _freeIndices.Push(index);
+            _tweenUpdates[index] = default;
+            _tweenUpdatesCount--;
         }
     }
 }
