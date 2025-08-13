@@ -13,6 +13,19 @@ namespace Moths.Tweens.Memory
 
         public bool IsAllocated { get; private set; }
 
+        public ref T Value => ref _pool[_index];
+
+        public bool IsNull
+        {
+            get
+            {
+                if (!IsAllocated) return true;
+                var value = Value;
+                if (value is UnityEngine.Object unityObj) return unityObj == null;
+                return value == null;
+            }
+        }
+
         static ManagedHeap()
         {
             _capacity = 64;
@@ -46,7 +59,6 @@ namespace Moths.Tweens.Memory
             return new ManagedHeap<T>(index);
         }
 
-        public ref T Value => ref _pool[_index];
 
         public void Dispose()
         {
@@ -66,6 +78,17 @@ namespace Moths.Tweens.Memory
             for (int i = _capacity; i < newCapacity; i++) _freeIndices.Push(i);
 
             _capacity = newCapacity;
+        }
+        
+        public static bool operator == (ManagedHeap<T> lhs, object rhs)
+        {
+            if (rhs == null) return lhs.IsNull;
+            return (rhs is T obj && obj == lhs.Value);
+        }
+
+        public static bool operator != (ManagedHeap<T> lhs, object rhs)
+        {
+            return !(lhs == rhs);
         }
     }
 }

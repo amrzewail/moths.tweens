@@ -16,7 +16,7 @@ namespace Moths.Tweens
 
             public unsafe void Update(bool complete)
             {
-                if (shared.hasLink && shared.link.IsAllocated && shared.link.Value == null)
+                if (shared.hasLink && shared.link.IsAllocated && shared.link == null)
                 {
                     CancelTween(shared.tweenIndex);
                     return;
